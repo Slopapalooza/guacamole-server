@@ -22,6 +22,7 @@
 
 #include <guacamole/client.h>
 #include <guacamole/mem.h>
+#include <guacamole/proctitle.h>
 #include <guacamole/protocol.h>
 #include <guacamole/socket.h>
 #include <guacamole/stream.h>
@@ -390,6 +391,10 @@ static pid_t guac_rdp_create_filter_process(guac_client* client,
  *     Always NULL.
  */
 static void* guac_rdp_print_job_output_thread(void* data) {
+
+    /* Thread name rdp-print: streams output from the RDP print filter
+     * process to the client as a downloadable file. */
+    guac_thread_name_set("rdp-print");
 
     int length;
     char buffer[6048];
