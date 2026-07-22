@@ -193,13 +193,23 @@ guacd_config* guacd_conf_load() {
     /* Read configuration from file */
     int fd = open(GUACD_CONF_FILE, O_RDONLY);
 
-    /* Notify of errors preventing reading */
-    if (fd < 0 && errno != ENOENT) {
-        fprintf(stderr, "Unable to open \"" GUACD_CONF_FILE "\": %s\n", strerror(errno));
-        guac_mem_free(conf->bind_host);
-        guac_mem_free(conf->bind_port);
-        guac_mem_free(conf);
-        return NULL;
+    /* The configuration file is optional. If it could not be opened, that is
+     * an error only when the file exists but is unreadable - a missing file
+     * simply means the built-in defaults are used. The file must NOT be
+     * parsed when the open failed, or guacd_conf_parse_file() would read from
+     * an invalid descriptor (EBADF) and abort startup. */
+    if (fd < 0) {
+
+        if (errno != ENOENT) {
+            fprintf(stderr, "Unable to open \"" GUACD_CONF_FILE "\": %s\n", strerror(errno));
+            guac_mem_free(conf->bind_host);
+            guac_mem_free(conf->bind_port);
+            guac_mem_free(conf);
+            return NULL;
+        }
+
+        return conf;
+
     }
 
     int retval = guacd_conf_parse_file(conf, fd);
