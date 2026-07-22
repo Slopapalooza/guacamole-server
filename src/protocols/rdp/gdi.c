@@ -36,8 +36,6 @@
 
 #include <stddef.h>
 
-#define JSON_BUFFER_SIZE 2048
-
 void guac_rdp_gdi_mark_frame(rdpContext* context, int starting) {
 
     guac_client* client = ((rdp_freerdp_context*) context)->client;
@@ -193,40 +191,8 @@ BOOL guac_rdp_gdi_desktop_resize(rdpContext* context) {
 
     guac_display_layer_close_raw(default_layer, current_context);
 
-    /* Make json string containing monitor information */
-    char json[JSON_BUFFER_SIZE];
-    int pos = 0;
-    pos += snprintf(json + pos, JSON_BUFFER_SIZE - pos, "{");
-
-    for (int i = 0; i < rdp_client->disp->monitors_count; i++) {
-
-        /* Skip monitors that have not been initialized yet */
-        if (rdp_client->disp->monitors[i].requested_width == 0 ||
-            rdp_client->disp->monitors[i].requested_height == 0) {
-            continue;
-        }
-
-        /* Append monitor information to JSON string */
-        pos += snprintf(json + pos, JSON_BUFFER_SIZE - pos,
-            "\"%d\": {\"left\":%d,\"top\":%d,\"width\":%d,\"height\":%d}",
-            i,
-            rdp_client->disp->monitors[i].left_offset,
-            rdp_client->disp->monitors[i].top_offset,
-            rdp_client->disp->monitors[i].requested_width,
-            rdp_client->disp->monitors[i].requested_height
-        );
-
-        /* Add comma between monitors, but not after the last one */
-        if (i + 1 < rdp_client->disp->monitors_count)
-            pos += snprintf(json + pos, JSON_BUFFER_SIZE - pos, ",");
-
-    }
-
-    snprintf(json + pos, JSON_BUFFER_SIZE - pos, "}");
-
-    /* Send monitor info to the client */
-    guac_protocol_send_set(client->socket, (const guac_layer*) default_layer,
-            GUAC_PROTOCOL_LAYER_PARAMETER_MULTIMON_LAYOUT, json);
+    /* Notify web clients of the new monitor layout */
+    guac_rdp_disp_send_layout(rdp_client->disp);
 
     /* Set default pointer after resizing to ensure it is visible when adding
      * a new monitor */

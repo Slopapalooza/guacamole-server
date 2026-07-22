@@ -344,14 +344,21 @@ void guac_display_end_multiple_frames(guac_display* display, int frames) {
         PFR_guac_display_plan_rewrite_as_rects(plan);
         GUAC_DISPLAY_PLAN_END_PHASE(display, "rects", 2, 5);
 
-        /* PASS 2 (and 3): Index all modified cells by their graphical contents and
-         * search the previous frame for occurrences of the same content. Where any
-         * draws could instead be represented as copies from the previous frame, do
-         * so instead of sending new image data. */
+        /* PASS 2 (and 3): DISABLED for this multi-monitor pilot build.
+         * These passes rewrite draws as copies from the previous frame, but
+         * with multiple monitor windows a copy's SOURCE region may lie in a
+         * slice of the display that a cropped client window does not have,
+         * leaving black rectangles (most visible when dragging windows
+         * between screens). Re-encoding the affected regions as images is
+         * always correct, at the cost of some extra bandwidth during
+         * scrolling and window drags. Revisit if upstream resolves the
+         * cross-monitor copy problem differently. */
+#if 0
         GUAC_DISPLAY_PLAN_BEGIN_PHASE();
         PFR_guac_display_plan_index_dirty_cells(plan);
         PFR_LFR_guac_display_plan_rewrite_as_copies(plan);
         GUAC_DISPLAY_PLAN_END_PHASE(display, "search", 3, 5);
+#endif
 
         /* PASS 4 (and 5): Combine adjacent updates in horizontal and vertical
          * directions where doing so would be more efficient. The goal of these

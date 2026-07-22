@@ -26,13 +26,24 @@
 #include <freerdp/client/disp.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/event.h>
+#include <winpr/wtypes.h>
 #include <guacamole/client.h>
+#include <guacamole/display.h>
 #include <guacamole/mem.h>
+#include <guacamole/protocol.h>
+#include <guacamole/protocol-constants.h>
+#include <guacamole/socket.h>
 #include <guacamole/rect.h>
 #include <guacamole/timestamp.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/**
+ * The size of the buffer used to build the multimon-layout JSON string.
+ */
+#define GUAC_RDP_DISP_JSON_BUFFER_SIZE 2048
 
 guac_rdp_disp* guac_rdp_disp_alloc(guac_client* client) {
 
@@ -45,6 +56,7 @@ guac_rdp_disp* guac_rdp_disp_alloc(guac_client* client) {
     /* No requests have been made */
     disp->last_request = guac_timestamp_current();
     disp->reconnect_needed = 0;
+    disp->resize_needed = false;
 
     /* Init first monitor */
     disp->monitors = guac_mem_alloc(sizeof(guac_rdp_disp_monitor));
@@ -261,8 +273,11 @@ static bool guac_rdp_disp_close_monitor(guac_rdp_disp* disp, int x_position) {
 
     int max_position = disp->monitors_count - 1;
 
-    /* Primary monitor or invalid position */
-    if (x_position <= 0 || x_position > max_position)
+    /* Invalid position, or closing the only remaining monitor. Slot 0 CAN
+     * be closed when other monitors remain: with position-based ordering
+     * the leftmost slot is not necessarily the client's main window. */
+    if (x_position < 0 || x_position > max_position
+            || disp->monitors_count <= 1)
         return false;
 
     /* The monitor to close is not the last one, so copy memory after it to
@@ -276,6 +291,15 @@ static bool guac_rdp_disp_close_monitor(guac_rdp_disp* disp, int x_position) {
 
     /* Deallocate a monitor */
     guac_rdp_disp_realloc_monitors(disp, max_position);
+
+    /* Monitors after the closed one have shifted position - recompute their
+     * stored positions and left offsets, which would otherwise go stale and
+     * be reported verbatim in the monitor layout */
+    for (int i = 0; i < disp->monitors_count; i++) {
+        disp->monitors[i].x_position = i;
+        disp->monitors[i].left_offset = guac_rdp_disp_get_left_offset(disp, i);
+    }
+
     disp->resize_needed = true;
 
     return true;
@@ -417,9 +441,37 @@ void guac_rdp_disp_update_size(guac_rdp_disp* disp,
 
         pthread_mutex_lock(&(rdp_client->message_lock));
         disp->disp->SendMonitorLayout(disp->disp, monitors_count, monitors);
+
+        /* Ask the RDP server to repaint the entire display. A pure monitor
+         * REORDER does not change the combined display dimensions, so no
+         * resize-driven redraw occurs and stale content (e.g. a taskbar
+         * sliver from the previous arrangement) would otherwise linger in
+         * regions the server does not consider changed. */
+        if (rdp_inst != NULL && rdp_inst->context != NULL
+                && rdp_inst->context->update != NULL
+                && rdp_inst->context->update->RefreshRect != NULL) {
+
+            RECTANGLE_16 refresh_area = {
+                .left   = 0,
+                .top    = 0,
+                .right  = (UINT16) width,
+                .bottom = (UINT16) height
+            };
+
+            rdp_inst->context->update->RefreshRect(rdp_inst->context,
+                    1, &refresh_area);
+
+        }
+
         pthread_mutex_unlock(&(rdp_client->message_lock));
 
         guac_mem_free(monitors);
+
+        /* Notify web clients of the new layout immediately: a pure monitor
+         * reorder does not change the combined display dimensions, so no
+         * desktop resize will fire and no layout update would otherwise be
+         * sent, leaving every window displaying a stale slice mapping. */
+        guac_rdp_disp_send_layout(disp);
 
     }
 
@@ -446,3 +498,58 @@ void guac_rdp_disp_reconnect_complete(guac_rdp_disp* disp) {
     disp->last_request = guac_timestamp_current();
 }
 
+void guac_rdp_disp_send_layout(guac_rdp_disp* disp) {
+
+    guac_client* client = disp->client;
+    guac_rdp_client* rdp_client = (guac_rdp_client*) client->data;
+
+    /* The display may not exist yet during connection setup */
+    if (rdp_client->display == NULL)
+        return;
+
+    guac_display_layer* default_layer =
+            guac_display_default_layer(rdp_client->display);
+
+    /* Make json string containing monitor information */
+    char json[GUAC_RDP_DISP_JSON_BUFFER_SIZE];
+    int pos = 0;
+    int first_monitor = 1;
+    pos += snprintf(json + pos, GUAC_RDP_DISP_JSON_BUFFER_SIZE - pos, "{");
+
+    for (int i = 0; i < disp->monitors_count; i++) {
+
+        /* Skip monitors that have not been initialized yet */
+        if (disp->monitors[i].requested_width == 0 ||
+            disp->monitors[i].requested_height == 0) {
+            continue;
+        }
+
+        /* Separate monitors with commas. The separator is emitted before
+         * each element after the first so that skipped (uninitialized)
+         * monitors can never leave a trailing comma behind, which would
+         * make the JSON unparseable. */
+        if (!first_monitor)
+            pos += snprintf(json + pos, GUAC_RDP_DISP_JSON_BUFFER_SIZE - pos, ",");
+        first_monitor = 0;
+
+        /* Append monitor information to JSON string */
+        pos += snprintf(json + pos, GUAC_RDP_DISP_JSON_BUFFER_SIZE - pos,
+            "\"%d\": {\"left\":%d,\"top\":%d,\"width\":%d,\"height\":%d}",
+            i,
+            disp->monitors[i].left_offset,
+            disp->monitors[i].top_offset,
+            disp->monitors[i].requested_width,
+            disp->monitors[i].requested_height
+        );
+
+    }
+
+    snprintf(json + pos, GUAC_RDP_DISP_JSON_BUFFER_SIZE - pos, "}");
+
+    /* Send monitor info to the client */
+    guac_protocol_send_set(client->socket, (const guac_layer*) default_layer,
+            GUAC_PROTOCOL_LAYER_PARAMETER_MULTIMON_LAYOUT, json);
+
+    guac_socket_flush(client->socket);
+
+}

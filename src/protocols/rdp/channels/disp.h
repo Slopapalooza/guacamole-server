@@ -203,6 +203,18 @@ void guac_rdp_disp_set_size(guac_rdp_disp* disp, guac_rdp_settings* settings,
         freerdp* rdp_inst, int width, int height, int x_position, int top_offset);
 
 /**
+ * Builds and sends the "multimon-layout" layer parameter describing the
+ * current monitor layout to all connected Guacamole users. This must be sent
+ * whenever the monitor layout changes - including pure reorders, which do
+ * not change the combined display dimensions and thus never trigger a
+ * desktop resize.
+ *
+ * @param disp
+ *     The display update module whose monitor layout should be sent.
+ */
+void guac_rdp_disp_send_layout(guac_rdp_disp* disp);
+
+/**
  * Sends an actual display update request to the RDP server based on previous
  * calls to guac_rdp_disp_set_size(). If an update was recently sent, the
  * update may be delayed until a future call to this function. If the RDP
