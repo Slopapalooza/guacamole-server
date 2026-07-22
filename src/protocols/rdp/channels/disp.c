@@ -59,6 +59,7 @@ guac_rdp_disp* guac_rdp_disp_alloc(guac_client* client) {
     disp->last_request = guac_timestamp_current();
     disp->reconnect_needed = 0;
     disp->resize_needed = false;
+    disp->refresh_pending = false;
 
     /* Init first monitor */
     disp->monitors = guac_mem_alloc(sizeof(guac_rdp_disp_monitor));
@@ -382,6 +383,47 @@ void guac_rdp_disp_set_size(guac_rdp_disp* disp, guac_rdp_settings* settings,
 
 }
 
+/**
+ * Asks the RDP server to repaint the entire display. Used both immediately
+ * after a layout change and as a deferred "settle" repaint after a resize
+ * (see guac_rdp_disp_update_size). Must be called WITHOUT the message lock
+ * held - it acquires it internally.
+ *
+ * @param disp
+ *     The display update module.
+ *
+ * @param rdp_inst
+ *     The FreeRDP instance, or NULL if not yet connected.
+ *
+ * @param width
+ *     The full combined display width, in pixels.
+ *
+ * @param height
+ *     The full combined display height, in pixels.
+ */
+static void guac_rdp_disp_refresh_display(guac_rdp_disp* disp,
+        freerdp* rdp_inst, int width, int height) {
+
+    if (rdp_inst == NULL || rdp_inst->context == NULL
+            || rdp_inst->context->update == NULL
+            || rdp_inst->context->update->RefreshRect == NULL)
+        return;
+
+    guac_rdp_client* rdp_client = (guac_rdp_client*) disp->client->data;
+
+    RECTANGLE_16 refresh_area = {
+        .left   = 0,
+        .top    = 0,
+        .right  = (UINT16) width,
+        .bottom = (UINT16) height
+    };
+
+    pthread_mutex_lock(&(rdp_client->message_lock));
+    rdp_inst->context->update->RefreshRect(rdp_inst->context, 1, &refresh_area);
+    pthread_mutex_unlock(&(rdp_client->message_lock));
+
+}
+
 void guac_rdp_disp_update_size(guac_rdp_disp* disp,
         guac_rdp_settings* settings, freerdp* rdp_inst) {
 
@@ -395,12 +437,30 @@ void guac_rdp_disp_update_size(guac_rdp_disp* disp,
     int width = guac_rdp_disp_get_left_offset(disp, monitors_count);
     int height = guac_rdp_disp_get_total_height(disp);
 
-    /* Do NOT send requests unless the size will change */
-    if (rdp_inst != NULL && !disp->resize_needed)
+    /* Do NOT send a layout update unless the size will change */
+    if (rdp_inst != NULL && !disp->resize_needed) {
+
+        /* The display has settled after a resize. Issue one deferred
+         * full-display repaint so no stale/blank regions remain where the
+         * RDP server declined to resend unchanged areas - the same repaint a
+         * manual window move would otherwise be needed to trigger. */
+        if (disp->refresh_pending) {
+            disp->refresh_pending = false;
+            disp->last_request = now;
+            guac_rdp_disp_refresh_display(disp, rdp_inst, width, height);
+        }
+
         return;
+
+    }
 
     disp->last_request = now;
     disp->resize_needed = false;
+
+    /* A resize is being applied now; a full repaint will be owed once the
+     * display settles (this same function, a later tick, via the branch
+     * above) */
+    disp->refresh_pending = true;
 
     if (settings->resize_method == GUAC_RESIZE_RECONNECT) {
 

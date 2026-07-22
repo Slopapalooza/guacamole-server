@@ -118,6 +118,15 @@ typedef struct guac_rdp_disp {
      */
     bool resize_needed;
 
+    /**
+     * A resize was recently applied and a full-display repaint is still owed.
+     * After a resize settles, the RDP server may not resend regions it does
+     * not consider changed, leaving stale/blank areas until something forces
+     * a repaint (e.g. moving the window). This flag causes a single
+     * full-extent Refresh Rect to be issued once the display has settled.
+     */
+    bool refresh_pending;
+
 } guac_rdp_disp;
 
 /**
