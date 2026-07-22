@@ -371,7 +371,18 @@ void guac_rdp_disp_set_size(guac_rdp_disp* disp, guac_rdp_settings* settings,
         monitor->requested_height = height;
         monitor->x_position       = x_position;
         monitor->top_offset       = top_offset;
-        monitor->left_offset      = guac_rdp_disp_get_left_offset(disp, x_position);
+
+        /* Recompute left offsets for ALL monitors, not just this one:
+         * changing this monitor's width shifts every monitor to its right.
+         * Updating only this monitor's own offset leaves those to its right
+         * stale, so the layout reported to clients (and to the RDP server)
+         * becomes internally inconsistent - e.g. monitor 0 widens but
+         * monitor 1 still reports its old left offset, and each window then
+         * positions its slice of the combined display at the wrong place
+         * (rendering appears "one resize behind"). */
+        for (int i = 0; i < disp->monitors_count; i++)
+            disp->monitors[i].left_offset =
+                    guac_rdp_disp_get_left_offset(disp, i);
     }
 
     /* Try to close monitor or ignore request */
