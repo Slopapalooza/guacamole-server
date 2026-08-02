@@ -1,10 +1,17 @@
-# Apache Guacamole Server — multi-monitor fork
+# Pico de Gallo — server
 
-Fork of [apache/guacamole-server](https://github.com/apache/guacamole-server).
-The default branch, **`multimon-1.6.0`**, is the 1.6.0 release plus
-multi-monitor RDP support and a set of fixes, developed and tested against a
-real deployment. The companion web-application fork is
-[guacamole-client](https://github.com/Slopapalooza/guacamole-client).
+**Pico de Gallo** is a downstream distribution based on
+[Apache Guacamole](https://guacamole.apache.org/) — a fork of
+[apache/guacamole-server](https://github.com/apache/guacamole-server) at the
+1.6.0 release. This is the guacd proxy: the 1.6.0 release plus multi-monitor
+RDP support and a set of stability fixes, developed and tested against a real
+deployment. The companion web application is
+[pico-de-gallo-client](https://github.com/Slopapalooza/pico-de-gallo-client).
+
+Pico de Gallo is not affiliated with or endorsed by the Apache Software
+Foundation. "Apache Guacamole" and "Apache" are trademarks of the ASF; this
+distribution retains the Apache-2.0 license and NOTICE and credits upstream
+throughout, but is not Apache Guacamole.
 
 Upstream's original build documentation is in the plain [`README`](README)
 file.
